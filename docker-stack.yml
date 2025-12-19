@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  traefik-26442:
+    image: traefik:v2.10
+    command:
+      - "--providers.docker.swarmMode=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certificates:/acme.json
+    networks:
+      - portfolio-network-26442
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == manager
+
+  postgres-26442:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: portfolio_db_26442
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data_26442:/var/lib/postgresql/data
+    networks:
+      - portfolio-network-26442
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager # Keep DB on manager for simplicity with volumes or use a shared volume driver
+
+  backend-26442:
+    image: portfolio-backend-26442:latest
+    environment:
+      POSTGRES_HOST: postgres-26442
+      POSTGRES_PASSWORD: password
+      JWT_SECRET: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+    networks:
+      - portfolio-network-26442
+    deploy:
+      replicas: 3
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.backend.rule=PathPrefix(`/api`)"
+        - "traefik.http.services.backend.loadbalancer.server.port=8080"
+      placement:
+        constraints:
+          - node.role == worker
+          - node.platform.os == linux
+
+  frontend-26442:
+    image: portfolio-frontend-26442:latest
+    networks:
+      - portfolio-network-26442
+    deploy:
+      replicas: 2
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+        - "traefik.http.services.frontend.loadbalancer.server.port=80"
+
+networks:
+  portfolio-network-26442:
+    driver: overlay
+
+volumes:
+  postgres_data_26442:
+  traefik_certificates:
