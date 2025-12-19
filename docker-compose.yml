@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  traefik-26442:
+    image: traefik:v2.10
+    container_name: traefik-26442
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080" # Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/acme.json:/acme.json
+    networks:
+      - portfolio-network-26442
+
+  postgres-26442:
+    image: postgres:15-alpine
+    container_name: postgres-26442
+    environment:
+      POSTGRES_DB: portfolio_db_26442
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data_26442:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - portfolio-network-26442
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5433:5432"
+
+  backend-26442:
+    build: ./backend
+    image: portfolio-backend-26442:latest
+    container_name: backend-26442
+    depends_on:
+      postgres-26442:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres-26442
+      POSTGRES_PORT: 5432
+      POSTGRES_PASSWORD: password
+      JWT_SECRET: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=PathPrefix(`/api`)"
+      - "traefik.http.services.backend.loadbalancer.server.port=8080"
+    networks:
+      - portfolio-network-26442
+
+  frontend-26442:
+    build: ./frontend
+    image: portfolio-frontend-26442:latest
+    container_name: frontend-26442
+    depends_on:
+      - backend-26442
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+    networks:
+      - portfolio-network-26442
+
+networks:
+  portfolio-network-26442:
+    driver: bridge
+
+volumes:
+  postgres_data_26442:
